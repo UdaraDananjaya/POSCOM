@@ -1,0 +1,24 @@
+{
+  "name": "backoffice",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.42",
+    "vue-router": "^4.4.5",
+    "pinia": "^2.2.6",
+    "vuetify": "^3.7.6",
+    "@mdi/font": "^7.4.47",
+    "firebase": "^11.0.0",
+    "@myshop/shared": "*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.3.0"
+  }
+}

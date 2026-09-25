@@ -1,0 +1,109 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isStaff() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/staffUsers/$(request.auth.uid));
+    }
+
+    function staffData() {
+      return get(/databases/$(database)/documents/staffUsers/$(request.auth.uid)).data;
+    }
+
+    function hasPermission(appCode) {
+      return isStaff() &&
+        (staffData().isSuperAdmin == true ||
+         (staffData().permissions[appCode] != null && staffData().permissions[appCode].status == true));
+    }
+
+    // ---- Public catalog data: anyone can read, only staff with 'catalog' permission can write ----
+    match /categories/{id}       { allow read: if true; allow write: if hasPermission('catalog'); }
+    match /manufacturers/{id}    { allow read: if true; allow write: if hasPermission('catalog'); }
+    match /suppliers/{id}        { allow read: if true; allow write: if hasPermission('catalog'); }
+    match /attributeGroups/{id}  { allow read: if true; allow write: if hasPermission('catalog');
+      match /values/{valueId}    { allow read: if true; allow write: if hasPermission('catalog'); }
+    }
+    match /quantityUnits/{id}     { allow read: if true; allow write: if hasPermission('catalog'); }
+    match /soldOutStatuses/{id}   { allow read: if true; allow write: if hasPermission('catalog'); }
+    match /deliveryStatuses/{id}  { allow read: if true; allow write: if hasPermission('catalog'); }
+
+    match /products/{id} {
+      allow read: if true;
+      allow write: if hasPermission('catalog');
+      match /variants/{variantKey} {
+        allow read: if true;
+        // Quantity/reserved on variants are only ever written by Cloud Functions
+        // (via the admin SDK, which bypasses rules); staff can still edit non-stock fields.
+        allow write: if hasPermission('catalog');
+      }
+      match /discussions/{discussionId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+        allow update, delete: if hasPermission('catalog') || request.auth.uid == resource.data.authorId;
+      }
+    }
+
+    // Stock ledger is server-written only (Cloud Functions use the Admin SDK, which
+    // is not subject to these rules); staff can read it for auditing.
+    match /stockMovements/{id} {
+      allow read: if hasPermission('catalog');
+      allow write: if false;
+    }
+
+    match /orderStatuses/{id} { allow read: if true; allow write: if hasPermission('settings'); }
+
+    // Orders: staff with 'orders' permission see/manage everything. A customer may
+    // only read their own orders. All order creation/status changes go through
+    // Cloud Functions (placePosSale/placeEcomOrder/updateOrderStatus) — direct
+    // client writes to orders are disabled so stock can never be bypassed.
+    match /orders/{id} {
+      allow read: if hasPermission('orders') ||
+        (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow write: if false;
+      match /comments/{commentId} {
+        allow read: if hasPermission('orders') ||
+          (isSignedIn() && get(/databases/$(database)/documents/orders/$(id)).data.customerId == request.auth.uid);
+        allow write: if false;
+      }
+    }
+
+    match /customers/{uid} {
+      allow read, update: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow read, write: if hasPermission('customers');
+    }
+
+    match /staffUsers/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow read, write: if hasPermission('users');
+    }
+
+    match /countries/{id}   { allow read: if true; allow write: if hasPermission('countries'); }
+    match /currencies/{id}  { allow read: if true; allow write: if hasPermission('currencies'); }
+    match /geoZones/{id}    { allow read: if true; allow write: if hasPermission('tax'); }
+    match /taxClasses/{id}  { allow read: if true; allow write: if hasPermission('tax'); }
+    match /taxRates/{id}    { allow read: if true; allow write: if hasPermission('tax'); }
+    match /languages/{id}   { allow read: if true; allow write: if hasPermission('languages'); }
+    match /uiStrings/{id}   { allow read: if true; allow write: if hasPermission('languages'); }
+
+    match /pages/{id}  { allow read: if true; allow write: if hasPermission('pages'); }
+    match /slides/{id} { allow read: if true; allow write: if hasPermission('slides'); }
+
+    match /paymentModules/{id}  { allow read: if true; allow write: if hasPermission('modules'); }
+    match /shippingModules/{id} { allow read: if true; allow write: if hasPermission('modules'); }
+
+    match /settings/{id} { allow read: if true; allow write: if hasPermission('settings'); }
+
+    match /newsletterSubscribers/{email} {
+      allow create: if true;
+      allow read, delete: if hasPermission('customers');
+      allow update: if false;
+    }
+  }
+}

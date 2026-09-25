@@ -44,8 +44,11 @@ async function ensureAuthUser(email, password, displayName) {
 
 async function seedOrderStatuses() {
   const statuses = [
-    { id: 'pending', name: 'Pending', color: 'blue', stockAction: 'reserve', notify: false, isSale: false, priority: 1 },
-    { id: 'processing', name: 'Processing', color: 'orange', stockAction: 'reserve', notify: true, isSale: false, priority: 2 },
+    // pending/processing use stockAction 'none': the customer's own order-create
+    // write never touches product stock (see firestore.rules) — stock only moves
+    // once staff commit the order to 'paid' or a later status.
+    { id: 'pending', name: 'Pending', color: 'blue', stockAction: 'none', notify: false, isSale: false, priority: 1 },
+    { id: 'processing', name: 'Processing', color: 'orange', stockAction: 'none', notify: true, isSale: false, priority: 2 },
     { id: 'paid', name: 'Paid', color: 'green', stockAction: 'commit', notify: true, isSale: true, priority: 3 },
     { id: 'dispatched', name: 'Dispatched', color: 'purple', stockAction: 'commit', notify: true, isSale: true, priority: 4 },
     { id: 'delivered', name: 'Delivered', color: 'teal', stockAction: 'commit', notify: true, isSale: true, priority: 5 },

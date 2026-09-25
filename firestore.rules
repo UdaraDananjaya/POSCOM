@@ -22,6 +22,10 @@ service cloud.firestore {
          (staffData().permissions[appCode] != null && staffData().permissions[appCode].status == true));
     }
 
+    function isSuperAdmin() {
+      return isStaff() && staffData().isSuperAdmin == true;
+    }
+
     // ---- Public catalog data: anyone can read, only staff with 'catalog' permission can write ----
     match /categories/{id}       { allow read: if true; allow write: if hasPermission('catalog'); }
     match /manufacturers/{id}    { allow read: if true; allow write: if hasPermission('catalog'); }
@@ -33,14 +37,16 @@ service cloud.firestore {
     match /soldOutStatuses/{id}   { allow read: if true; allow write: if hasPermission('catalog'); }
     match /deliveryStatuses/{id}  { allow read: if true; allow write: if hasPermission('catalog'); }
 
+    // Products: catalog edits need 'catalog'; stock quantity/reserved also need to be
+    // writable by 'orders' staff (POS sales, order status changes run client-side —
+    // there is no server to bypass rules with, so fulfillment staff need direct write
+    // access to the collection stock transactions touch).
     match /products/{id} {
       allow read: if true;
-      allow write: if hasPermission('catalog');
+      allow write: if hasPermission('catalog') || hasPermission('orders');
       match /variants/{variantKey} {
         allow read: if true;
-        // Quantity/reserved on variants are only ever written by Cloud Functions
-        // (via the admin SDK, which bypasses rules); staff can still edit non-stock fields.
-        allow write: if hasPermission('catalog');
+        allow write: if hasPermission('catalog') || hasPermission('orders');
       }
       match /discussions/{discussionId} {
         allow read: if true;
@@ -49,27 +55,36 @@ service cloud.firestore {
       }
     }
 
-    // Stock ledger is server-written only (Cloud Functions use the Admin SDK, which
-    // is not subject to these rules); staff can read it for auditing.
+    // Stock ledger: written by the same staff who can move stock; read for auditing.
     match /stockMovements/{id} {
-      allow read: if hasPermission('catalog');
-      allow write: if false;
+      allow read: if hasPermission('catalog') || hasPermission('orders');
+      allow create: if hasPermission('catalog') || hasPermission('orders');
+      allow update, delete: if false;
     }
 
     match /orderStatuses/{id} { allow read: if true; allow write: if hasPermission('settings'); }
 
-    // Orders: staff with 'orders' permission see/manage everything. A customer may
-    // only read their own orders. All order creation/status changes go through
-    // Cloud Functions (placePosSale/placeEcomOrder/updateOrderStatus) — direct
-    // client writes to orders are disabled so stock can never be bypassed.
+    // Orders: a customer may create their own order (source 'ecom', pending status —
+    // pending has stockAction 'none', so this never touches product stock) and read
+    // only their own orders. Staff with 'orders' permission can create (POS sales),
+    // read, and update any order (status changes, which is what actually moves stock,
+    // via the client-side transaction in services/orders.js).
     match /orders/{id} {
       allow read: if hasPermission('orders') ||
         (isSignedIn() && resource.data.customerId == request.auth.uid);
-      allow write: if false;
+      allow create: if hasPermission('orders') ||
+        (isSignedIn() &&
+         request.resource.data.source == 'ecom' &&
+         request.resource.data.customerId == request.auth.uid &&
+         request.resource.data.orderStatusId == 'pending');
+      allow update: if hasPermission('orders');
+      allow delete: if false;
+
       match /comments/{commentId} {
         allow read: if hasPermission('orders') ||
           (isSignedIn() && get(/databases/$(database)/documents/orders/$(id)).data.customerId == request.auth.uid);
-        allow write: if false;
+        allow create: if hasPermission('orders');
+        allow update, delete: if false;
       }
     }
 
@@ -81,7 +96,9 @@ service cloud.firestore {
 
     match /staffUsers/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
-      allow read, write: if hasPermission('users');
+      // Only a super-admin may create new staff accounts (see services/staff.js).
+      allow create: if isSuperAdmin();
+      allow update, delete: if hasPermission('users') || isSuperAdmin();
     }
 
     match /countries/{id}   { allow read: if true; allow write: if hasPermission('countries'); }

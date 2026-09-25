@@ -16,6 +16,7 @@ const routes = [
       { path: 'login', name: 'login', component: () => import('../storefront/views/LoginView.vue') },
       { path: 'register', name: 'register', component: () => import('../storefront/views/RegisterView.vue') },
       { path: 'account/orders', name: 'order-history', component: () => import('../storefront/views/OrderHistoryView.vue') },
+      { path: 'account/address', name: 'account-address', component: () => import('../storefront/views/AccountAddressView.vue') },
       { path: 'order/:id', name: 'order-detail', component: () => import('../storefront/views/OrderDetailView.vue'), props: true },
       { path: 'order-success/:id', name: 'order-success', component: () => import('../storefront/views/OrderSuccessView.vue'), props: true },
       { path: 'page/:id', name: 'page', component: () => import('../storefront/views/PageView.vue'), props: true },

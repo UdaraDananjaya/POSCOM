@@ -9,6 +9,7 @@ import { formatMoney } from '../../../utils/money.js';
 import { COL } from '../../../constants.js';
 import { placePosSale } from '../../../services/orders.js';
 import { enqueueSale } from '../../pos/offlineQueue.js';
+import { parkedSales, parkSale, resumeSale, deleteParkedSale } from '../../pos/parkedSales.js';
 import { CURRENCY_SYMBOL, DEFAULT_CURRENCY } from '../../../config.js';
 
 const { profile } = useAuth(COL.STAFF_USERS);
@@ -34,6 +35,55 @@ const completing = ref(false);
 
 const receiptDialog = ref(false);
 const lastReceipt = ref(null);
+
+const posCustomer = ref(null); // { name, phone, address1, address2, city, postcode }
+const customerDialog = ref(false);
+const customerForm = ref({ name: '', phone: '', address1: '', address2: '', city: '', postcode: '' });
+
+function openCustomerDialog() {
+  customerForm.value = posCustomer.value
+    ? { ...posCustomer.value }
+    : { name: '', phone: '', address1: '', address2: '', city: '', postcode: '' };
+  customerDialog.value = true;
+}
+function saveCustomer() {
+  const hasAny = Object.values(customerForm.value).some((v) => v.trim());
+  posCustomer.value = hasAny ? { ...customerForm.value } : null;
+  customerDialog.value = false;
+}
+function clearCustomer() {
+  posCustomer.value = null;
+}
+
+const parkDialog = ref(false);
+const parkLabel = ref('');
+const parkedListDialog = ref(false);
+
+function openParkDialog() {
+  if (!cart.value.length) return;
+  parkLabel.value = posCustomer.value?.name || '';
+  parkDialog.value = true;
+}
+function confirmPark() {
+  parkSale({ label: parkLabel.value, items: cart.value, customer: posCustomer.value });
+  cart.value = [];
+  posCustomer.value = null;
+  parkDialog.value = false;
+  notify('Sale parked', 'success');
+}
+function handleResume(id) {
+  if (cart.value.length && !confirm('This will replace the current sale. Continue?')) return;
+  const entry = resumeSale(id);
+  if (!entry) return;
+  cart.value = entry.items;
+  posCustomer.value = entry.customer || null;
+  parkedListDialog.value = false;
+  focusScan();
+}
+function handleDeleteParked(id) {
+  if (!confirm('Delete this parked sale?')) return;
+  deleteParkedSale(id);
+}
 
 const isOnline = ref(navigator.onLine);
 window.addEventListener('online', () => (isOnline.value = true));
@@ -140,6 +190,7 @@ function removeItem(item) {
 }
 function clearCart() {
   cart.value = [];
+  posCustomer.value = null;
 }
 
 function openTender() {
@@ -160,6 +211,7 @@ async function completeSale() {
     payments: [{ method: tenderMethod.value, amount: tenderMethod.value === 'cash' ? Number(cashTendered.value) : subtotal.value }],
     currencyCode: DEFAULT_CURRENCY,
     staffId: profile.value?.id,
+    customer: posCustomer.value,
   };
 
   let receiptItems = [...cart.value];
@@ -181,7 +233,7 @@ async function completeSale() {
   lastReceipt.value = {
     items: receiptItems, subtotal: subtotal.value, method: tenderMethod.value,
     cashTendered: cashTendered.value, changeDue: changeDue.value, queued,
-    staff: profile.value?.username, date: new Date(),
+    staff: profile.value?.username, date: new Date(), customer: posCustomer.value,
   };
   clearCart();
   tenderDialog.value = false;
@@ -200,6 +252,13 @@ function printReceipt() {
       <v-alert v-if="!isOnline" type="warning" density="compact" class="mb-3">
         Offline — sales will queue and sync automatically once connection returns.
       </v-alert>
+
+      <div class="d-flex justify-end mb-3">
+        <v-btn variant="tonal" prepend-icon="mdi-tray-arrow-down" @click="parkedListDialog = true">
+          Parked sales
+          <v-badge v-if="parkedSales.length" :content="parkedSales.length" color="secondary" inline class="ml-1" />
+        </v-btn>
+      </div>
 
       <v-text-field
         ref="scanInputRef"
@@ -233,8 +292,27 @@ function printReceipt() {
         <div class="d-flex align-center mb-3">
           <h2 class="text-h6">Sale ({{ itemCount }})</h2>
           <v-spacer />
+          <v-btn size="small" variant="text" @click="openParkDialog" v-if="cart.length" prepend-icon="mdi-pause-circle-outline">Park</v-btn>
           <v-btn size="small" variant="text" @click="clearCart" v-if="cart.length">Clear</v-btn>
         </div>
+
+        <v-chip
+          v-if="posCustomer"
+          closable
+          size="small"
+          color="primary"
+          variant="tonal"
+          class="mb-3"
+          prepend-icon="mdi-account"
+          @click="openCustomerDialog"
+          @click:close="clearCustomer"
+        >
+          {{ posCustomer.name || 'Customer info added' }}
+        </v-chip>
+        <v-btn v-else size="small" variant="outlined" class="mb-3" prepend-icon="mdi-account-plus-outline" @click="openCustomerDialog">
+          Add customer / address
+        </v-btn>
+
         <v-list density="compact">
           <v-list-item v-for="item in cart" :key="item.key">
             <v-list-item-title>{{ item.name }}</v-list-item-title>
@@ -302,6 +380,68 @@ function printReceipt() {
     </v-card>
   </v-dialog>
 
+  <!-- Customer / address -->
+  <v-dialog v-model="customerDialog" max-width="420" @after-leave="focusScan">
+    <v-card>
+      <v-card-title>Customer / delivery address</v-card-title>
+      <v-card-text>
+        <v-text-field v-model="customerForm.name" label="Name" class="mb-2" />
+        <v-text-field v-model="customerForm.phone" label="Phone" class="mb-2" />
+        <v-text-field v-model="customerForm.address1" label="Address line 1" class="mb-2" />
+        <v-text-field v-model="customerForm.address2" label="Address line 2" class="mb-2" />
+        <v-row dense>
+          <v-col cols="6"><v-text-field v-model="customerForm.city" label="City" /></v-col>
+          <v-col cols="6"><v-text-field v-model="customerForm.postcode" label="Postcode" /></v-col>
+        </v-row>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="customerDialog = false">Cancel</v-btn>
+        <v-btn color="primary" @click="saveCustomer">Save</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <!-- Park sale -->
+  <v-dialog v-model="parkDialog" max-width="360" @after-leave="focusScan">
+    <v-card>
+      <v-card-title>Park this sale</v-card-title>
+      <v-card-text>
+        <v-text-field v-model="parkLabel" label="Label (e.g. customer name)" autofocus @keyup.enter="confirmPark" />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="parkDialog = false">Cancel</v-btn>
+        <v-btn color="primary" @click="confirmPark">Park sale</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <!-- Parked sales list -->
+  <v-dialog v-model="parkedListDialog" max-width="480" @after-leave="focusScan">
+    <v-card>
+      <v-card-title>Parked sales</v-card-title>
+      <v-list>
+        <v-list-item
+          v-for="p in parkedSales"
+          :key="p.id"
+          :title="p.label || `Parked sale (${p.items.length} item${p.items.length === 1 ? '' : 's'})`"
+          :subtitle="new Date(p.parkedAt).toLocaleTimeString()"
+        >
+          <template #append>
+            <v-btn size="small" color="primary" variant="tonal" class="mr-1" @click="handleResume(p.id)">Resume</v-btn>
+            <v-btn icon="mdi-delete-outline" size="small" variant="text" @click="handleDeleteParked(p.id)" />
+          </template>
+        </v-list-item>
+        <v-list-item v-if="!parkedSales.length" title="No parked sales" />
+      </v-list>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="parkedListDialog = false">Close</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
   <!-- Receipt -->
   <v-dialog v-model="receiptDialog" max-width="360" @after-leave="focusScan">
     <v-card v-if="lastReceipt">
@@ -310,6 +450,14 @@ function printReceipt() {
         <div v-if="lastReceipt.queued" class="text-center mb-2">*** OFFLINE — WILL SYNC ***</div>
         <div>{{ lastReceipt.date.toLocaleString() }}</div>
         <div>Cashier: {{ lastReceipt.staff || '—' }}</div>
+        <template v-if="lastReceipt.customer">
+          <div v-if="lastReceipt.customer.name">Customer: {{ lastReceipt.customer.name }}</div>
+          <div v-if="lastReceipt.customer.address1">
+            {{ lastReceipt.customer.address1 }}<span v-if="lastReceipt.customer.address2">, {{ lastReceipt.customer.address2 }}</span>
+          </div>
+          <div v-if="lastReceipt.customer.city">{{ lastReceipt.customer.city }} {{ lastReceipt.customer.postcode }}</div>
+          <div v-if="lastReceipt.customer.phone">{{ lastReceipt.customer.phone }}</div>
+        </template>
         <v-divider class="my-2" />
         <div v-for="item in lastReceipt.items" :key="item.key" class="d-flex justify-space-between">
           <span>{{ item.quantity }}x {{ item.name }}</span>

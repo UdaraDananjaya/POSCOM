@@ -79,6 +79,7 @@ async function subscribe() {
         <v-list>
           <v-list-item :title="profile?.firstname || currentUser.email" subtitle="My account" />
           <v-divider />
+          <v-list-item title="My address" to="/account/address" />
           <v-list-item title="Order history" to="/account/orders" />
           <v-list-item title="Sign out" @click="handleSignOut" />
         </v-list>

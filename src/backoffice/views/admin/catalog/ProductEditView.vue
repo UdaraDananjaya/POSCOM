@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { doc, getDoc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../../../firebase.js';
 import { useCategories, getQuantityAvailable } from '../../../../composables/useProducts.js';
@@ -29,6 +29,29 @@ const form = ref({
 const adjustDialog = ref(false);
 const adjustAmount = ref(0);
 const adjustNote = ref('');
+
+const categoryDialog = ref(false);
+const newCategoryName = ref('');
+const creatingCategory = ref(false);
+
+async function createCategory() {
+  if (!newCategoryName.value.trim()) return;
+  creatingCategory.value = true;
+  try {
+    const ref = await addDoc(collection(db, COL.CATEGORIES), {
+      name: { en: newCategoryName.value.trim() },
+      parentId: null,
+      priority: 0,
+      status: true,
+      dateCreated: serverTimestamp(),
+    });
+    form.value.categories.push(ref.id);
+    newCategoryName.value = '';
+    categoryDialog.value = false;
+  } finally {
+    creatingCategory.value = false;
+  }
+}
 
 async function load() {
   if (isNew.value) return;
@@ -115,7 +138,10 @@ async function submitAdjustment() {
         <v-text-field v-model="form.name" label="Name" class="mb-2" />
         <v-text-field v-model="form.sku" label="SKU / barcode" class="mb-2" hint="Scanned/typed in POS to find this product" persistent-hint />
         <v-textarea v-model="form.description" label="Description" class="mb-2" rows="3" />
-        <v-select v-model="form.categories" :items="categories" item-title="name.en" item-value="id" label="Categories" multiple chips class="mb-2" />
+        <div class="d-flex align-center ga-2 mb-2">
+          <v-select v-model="form.categories" :items="categories" item-title="name.en" item-value="id" label="Categories" multiple chips hide-details class="flex-grow-1" />
+          <v-btn icon="mdi-plus" variant="tonal" size="small" title="New category" @click="categoryDialog = true" />
+        </div>
         <v-select v-model="form.manufacturerId" :items="manufacturers" item-title="name" item-value="id" label="Manufacturer" clearable class="mb-2" />
         <v-select v-model="form.taxClassId" :items="taxClasses" item-title="name" item-value="id" label="Tax class" clearable class="mb-2" />
         <v-text-field v-model="form.price" label="Price (USD)" type="number" step="0.01" class="mb-2" />
@@ -167,6 +193,20 @@ async function submitAdjustment() {
           <v-spacer />
           <v-btn variant="text" @click="adjustDialog = false">Cancel</v-btn>
           <v-btn color="primary" @click="submitAdjustment">Apply</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="categoryDialog" max-width="360">
+      <v-card>
+        <v-card-title>New category</v-card-title>
+        <v-card-text>
+          <v-text-field v-model="newCategoryName" label="Category name" autofocus @keyup.enter="createCategory" />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="categoryDialog = false">Cancel</v-btn>
+          <v-btn color="primary" :loading="creatingCategory" @click="createCategory">Create</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

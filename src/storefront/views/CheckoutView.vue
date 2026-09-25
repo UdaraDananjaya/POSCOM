@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../../firebase.js';
 import { useAuth } from '../../composables/useAuth.js';
 import { useCart } from '../../composables/useCart.js';
 import { placeEcomOrder } from '../../services/orders.js';
@@ -47,6 +49,10 @@ async function submit() {
   error.value = '';
   submitting.value = true;
   try {
+    // Remember this address on the customer's profile so it's pre-filled next time
+    // and shows up on their My Address page.
+    await setDoc(doc(db, COL.CUSTOMERS, currentUser.value.uid), address.value, { merge: true });
+
     const { orderId } = await placeEcomOrder({
       items: items.map((i) => ({
         productId: i.productId,

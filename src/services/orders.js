@@ -60,7 +60,7 @@ export async function placeEcomOrder({ items, customer, shippingOption, paymentO
 }
 
 /** A POS sale is paid on the spot: stock commit + order creation happen in one atomic transaction. */
-export async function placePosSale({ items, payments, currencyCode = 'USD', staffId }) {
+export async function placePosSale({ items, payments, currencyCode = 'USD', staffId, customer = null }) {
   const orderRef = doc(collection(db, COL.ORDERS));
 
   await runTransaction(db, async (tx) => {
@@ -80,6 +80,7 @@ export async function placePosSale({ items, payments, currencyCode = 'USD', staf
     tx.set(orderRef, {
       source: ORDER_SOURCE.POS,
       staffId,
+      customer,
       items,
       payments: payments || [],
       currencyCode,

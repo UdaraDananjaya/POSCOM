@@ -87,10 +87,12 @@ async function changeStatus(newStatusId) {
         <v-card v-if="order.customer">
           <v-card-title>Customer</v-card-title>
           <v-card-text>
-            {{ order.customer.firstname }} {{ order.customer.lastname }}<br />
-            {{ order.customer.address1 }} {{ order.customer.address2 }}<br />
-            {{ order.customer.city }} {{ order.customer.postcode }}, {{ order.customer.countryCode }}<br />
-            {{ order.customer.phone }} · {{ order.customer.email }}
+            {{ order.customer.name || `${order.customer.firstname || ''} ${order.customer.lastname || ''}`.trim() || '—' }}<br />
+            <template v-if="order.customer.address1">
+              {{ order.customer.address1 }}<span v-if="order.customer.address2">, {{ order.customer.address2 }}</span><br />
+              {{ order.customer.city }} {{ order.customer.postcode }}<span v-if="order.customer.countryCode">, {{ order.customer.countryCode }}</span><br />
+            </template>
+            {{ order.customer.phone }}<span v-if="order.customer.email"> · {{ order.customer.email }}</span>
           </v-card-text>
         </v-card>
       </v-col>
